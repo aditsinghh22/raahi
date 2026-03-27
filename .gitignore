@@ -1,1 +1,35 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Replit / attached assets
+attached_assets/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Lock files (optional — uncomment to ignore)
+# package-lock.json
+# pnpm-lock.yaml
