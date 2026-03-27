@@ -1,0 +1,175 @@
+Layer 1 — Frontend
+Next.js 14 with App Router is your choice. Not Create React App, not Vite standalone. Next.js because you need server-side rendering (compliance data must load fast for SEO and trust), API routes in the same codebase, and Vercel deployment in one click.
+TypeScript is non-negotiable. You are building a product that deals with legal deadlines and penalties. A type error that slips into production could show a user the wrong fine amount. TypeScript catches these at compile time.
+Tailwind CSS + shadcn/ui for the design system. shadcn gives you production-quality components (tables, modals, toasts, forms) that you own the code for — not a third-party dependency that breaks. Your dashboard will look professional from day one.
+Framer Motion for animations — the compliance map reveal, the penalty counter ticking up, the alert badges. These micro-interactions are what make users feel the product is alive.
+
+Layer 2 — API & Auth
+tRPC is the secret weapon here. It lets your frontend call backend functions as if they're local functions — fully type-safe, no REST boilerplate, no mismatched API contracts. When you're vibe-coding fast, this eliminates an entire category of bugs.
+Clerk for authentication. Not NextAuth, not rolling your own. Clerk gives you: Google/LinkedIn OAuth, OTP login (Indian users love OTP), multi-factor auth, organisation management (one CA managing multiple client accounts), and a beautiful pre-built UI. It handles the hard stuff — session management, token refresh, device tracking — so you don't have to.
+Middleware for rate limiting using Upstash Redis. Protect your AI endpoints from abuse. A user spamming the "analyze my document" button 100 times would cost you real money in OpenAI bills.
+
+Layer 3 — The Core Services (Your Actual Product)
+This is where you spend 80% of your time. Four distinct engines:
+The Rule Engine — Your Moat
+This is the most important thing you will build. It is a structured decision system — not AI, not a chatbot — a deterministic engine that takes inputs and returns compliance requirements.
+How it works:
+Input:  { industry, state, structure, employees, turnover, hasPhysicalPremise }
+Output: [ { name, authority, priority, cost, timeToGet, renewalCycle, penaltyForMissing } ]
+You store this as a JSON rule database in PostgreSQL. Think of it as:
+json{
+  "rule_id": "FSSAI_STATE",
+  "name": "FSSAI State License",
+  "trigger": {
+    "industry": ["food_beverage"],
+    "turnover_min": 1200000,
+    "turnover_max": 200000000
+  },
+  "details": {
+    "authority": "FSSAI",
+    "cost": 2000,
+    "processing_days": 30,
+    "renewal_years": 1,
+    "penalty_per_day": 25000
+  }
+}
+```
+
+You build this rule database manually and carefully. Start with the 8 industries you defined. Each industry gets ~15-40 rules. Total: roughly 200-300 rules at launch. This database, properly maintained, is your deepest moat because it requires domain expertise and constant updates to stay accurate.
+
+**State-awareness:** Indian compliance is brutally state-specific. A Shop & Establishment registration in Maharashtra has different fees, forms, and renewal dates than in Karnataka. You handle this with a `state_overrides` field on each rule.
+
+### The Document Engine
+
+Users upload invoices, certificates, bank statements. You need to extract structured data from unstructured PDFs.
+
+**Stack:**
+- **PDF.js** for reading PDFs in the browser (preview)
+- **Supabase Storage** for storing the raw files
+- **OpenAI Vision (GPT-4o)** for extraction — send the PDF page as an image, get back structured JSON
+- **Zod schemas** to validate the extracted data before trusting it
+
+The flow: Upload → Store in Supabase → Send to OpenAI Vision → Validate with Zod → Save structured data to PostgreSQL → Show user the extracted summary.
+
+**Why OpenAI Vision over Tesseract:** Tesseract is open-source OCR but it fails badly on Indian invoice formats, regional language labels, and poor scan quality. GPT-4o Vision reads context — it understands that "CGST @9%" means Central GST at 9%, even if the formatting is irregular.
+
+### The Alert Engine
+
+**Twilio** for WhatsApp and SMS. WhatsApp Business API through Twilio is the right choice — it has the highest open rate in India (98%+) and users actually act on WhatsApp messages.
+
+**Resend** for emails. Not SendGrid, not Mailgun. Resend is developer-friendly, has React Email templates (you write your email in React JSX — beautiful), and has excellent deliverability. Your penalty warning emails need to land in inbox, not spam.
+
+Alert intelligence lives in the database: a `scheduled_alerts` table that background jobs read every hour. Each alert has a `send_at` timestamp, a `channel` (whatsapp/email/sms), and a `template_id`.
+
+### The Filing Engine
+
+This prepares the actual forms. For the MVP, this means:
+- Pulling the user's data from your database
+- Filling a form template (GSTR-1, TDS return, etc.)
+- Generating a PDF the user can download and submit
+- OR a "Hire CA" button that packages everything neatly for a CA
+
+For the advanced version (Year 2), you integrate with the actual government portals using their APIs where available (GST portal has APIs, MCA21 has APIs). But do NOT attempt real government API integration in your MVP — it's complex, requires government approval, and will slow you down.
+
+---
+
+## Layer 4 — The AI Layer
+
+You use AI for **5 specific tasks**, not as a general chatbot:
+
+**1. Business Profiling (Onboarding)** — User describes their business in free text. GPT-4o extracts structured fields: `{ industry, subIndustry, state, estimatedTurnover, employeeRange }`. This feeds the rule engine.
+
+**2. Document Parsing** — As described above. Invoice → structured GST data.
+
+**3. Compliance Q&A (RAG)** — User asks "What happens if I miss my GSTR-1?" You use Retrieval Augmented Generation: embed your rule database + compliance content, retrieve the relevant chunks, send to GPT-4o with context. This gives accurate, sourced answers — not hallucinated ones.
+
+**4. Scheme Matching** — User's business profile goes in, eligible government schemes come out. GPT-4o compares the profile against your scheme database and returns matches with eligibility reasons.
+
+**5. Penalty Calculation Explanation** — "You owe ₹3,200 because: 45 days late × ₹50/day late fee + 18% interest on outstanding = ₹2,025 + ₹1,175." The math is deterministic (done in your code), the plain-English explanation is GPT-4o.
+
+**Critical rule: AI is never the source of truth.** The rule engine and your curated database are the source of truth. AI only communicates and extracts. If GPT-4o says "you need X license" but your rule engine says you don't — your rule engine wins. Always.
+
+---
+
+## Layer 5 — The Database
+
+**PostgreSQL via Supabase** for everything structured. Supabase gives you: a hosted Postgres database, Row-Level Security (users can only see their own data — critical for compliance data), real-time subscriptions (dashboard updates live), auto-generated REST APIs, and a visual dashboard for you to manage data.
+
+**Key tables you'll build:**
+```
+businesses          → core company profile
+compliance_rules    → your rule engine database
+user_compliance     → which rules apply to which business + status
+deadlines           → all filing deadlines per business
+documents           → uploaded files + extracted data
+alerts              → scheduled notification queue
+filings             → history of all filings
+schemes             → government scheme database
+```
+
+**Upstash Redis** for:
+- Caching deadline calculations (expensive to recompute every page load)
+- Background job queues
+- Rate limiting counters
+- Session data
+
+**Never store sensitive data in plain text.** GST returns, financial data, employee data — encrypt at rest using Supabase's built-in encryption. This is non-negotiable for trust.
+
+---
+
+## Layer 6 — Background Jobs
+
+This is the piece most vibe-coders forget — and it's critical for your product. Compliance is time-driven. You need things to happen automatically at the right time.
+
+**Inngest or Trigger.dev** — both are excellent for this. They let you write background functions in TypeScript that trigger on schedules or events.
+
+**Jobs you need:**
+```
+deadline_scanner     → runs daily at 6 AM, checks all deadlines, 
+                        queues alerts for anything due in 1/3/7/14/30 days
+
+turnover_checker     → runs monthly, checks if a business crossed 
+                        a threshold that changes their compliance requirements
+
+law_change_scanner   → runs weekly, checks your rule database for 
+                        any rules marked "recently_updated", alerts affected users
+
+filing_reminder      → triggers 48hrs before a deadline if filing 
+                        hasn't been started
+
+penalty_escalator    → if a deadline is missed, escalates the alert 
+                        urgency and recalculates the growing penalty
+
+Layer 7 — External Services
+ServicePurposeWhy This OneClerkAuthBest DX, handles OTP for IndiaTwilioWhatsApp + SMSOnly real option for WhatsApp Business APIResendEmailReact Email templates, great deliverabilityRazorpaySubscriptionsIndian cards, UPI, built for Indian startupsSentryError trackingSee every crash in production in real-timePostHogAnalyticsSee how users actually use the productVercelHostingZero-config Next.js deploymentUpstashRedisServerless Redis, pay per request
+
+How to Make It Reliable & Trustable
+This is the most important section. Here's how you build trust into the architecture:
+1. The Rule Engine Must Be Versioned
+Every compliance rule has a valid_from date and a source (the actual government notification/circular number). When a law changes, you don't delete the old rule — you create a new version. This means you can answer "what were the rules in January 2024?" and you have an audit trail.
+2. Every AI Output Gets a Confidence Flag
+When GPT-4o extracts data from a document, you store a confidence_score. Below 85% confidence → you show the user a warning: "Please verify this figure — we weren't fully sure." You never silently show low-confidence data as fact.
+3. Row-Level Security Everywhere
+With Supabase RLS, you write policies like: users can only read rows where business_id = their business_id. Even if there's a bug in your API code, the database refuses to return another user's data. This is your security backstop.
+4. Idempotent Background Jobs
+Every background job has an idempotency_key. If the job runs twice (server restart, retry), it produces the same result and doesn't send the user two WhatsApp messages. This is standard engineering practice that most vibe-coders skip.
+5. A "Law Update" Process
+You personally need to watch for GST council notifications, MCA circulars, and state government gazettes. When something changes, you update the rule database with the new rule version. Consider building a simple internal admin panel (Supabase's Studio is enough) to manage rules. This process — manual, careful, human-verified — is what makes users trust you over a chatbot.
+6. Disclaimer Architecture
+Every compliance output shows: "Based on rules current as of [date]. Please verify with a CA for final decisions." This is both legally smart and trust-building — it signals that you're careful, not overconfident.
+
+The Vibe-Coding Build Order
+Build in this exact sequence. Each step gives you something demo-able:
+Week 1 — Foundation
+Set up Next.js + Clerk + Supabase + tRPC. Build auth flow. Build the onboarding questionnaire. Build the rule engine with 20 rules for food & tech startups. Show the compliance map.
+Week 2 — The Core Loop
+Build the dashboard (deadline tracker, status indicators). Build document upload + GPT-4o extraction. Build the alert system (email first, WhatsApp later). Add Razorpay subscription.
+Week 3 — The Depth
+Expand rule engine to all 8 industries. Build the government schemes module. Build penalty calculator. Build document templates (offer letter, NDA, privacy policy).
+Week 4 — The Polish
+Background jobs (Inngest). Error tracking (Sentry). Analytics (PostHog). Performance optimization. Security audit (check all RLS policies). Soft launch.
+
+The One Thing That Will Make or Break This
+The technology is the easy part. Every tool above is well-documented, has AI assistants that can help you write the code, and is used by thousands of companies.
+The hard part is the rule database. Spend serious time getting the compliance rules right — actual government sources, not just what some blog says. Cross-reference with a CA. When your rules are accurate, everything else is just plumbing. When your rules are wrong, no amount of beautiful UI saves you.
+That rule database, built carefully and updated regularly, is the reason users will pay ₹2,999/month instead of asking ChatGPT.

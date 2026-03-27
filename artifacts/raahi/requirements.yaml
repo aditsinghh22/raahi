@@ -1,0 +1,17 @@
+packages:
+  "framer-motion": "For high-performance, smooth scroll animations and entry effects"
+  "clsx": "For conditional tailwind class merging"
+  "tailwind-merge": "For conflict resolution in tailwind classes"
+
+images:
+  - path: "artifacts/raahi/public/images/hero-bg.png"
+    description: "Ultra premium abstract deep space background with electric blue and cyan glowing geometric mesh and subtle particle light leaks, quantitative finance aesthetic"
+    aspect_ratio: "16:9"
+  - path: "artifacts/raahi/public/images/architecture-bg.png"
+    description: "Dark glowing blueprint schematic with abstract nodes connecting in a neural network pattern, electric cyan on deep navy black background"
+    aspect_ratio: "16:9"
+
+notes:
+  - This is a pure frontend marketing page mockup.
+  - The waitlist form uses a mocked mutation hook since there's no backend specified.
+  - Uses Framer Motion for scroll-driven animations based on the worldquantfoundry.com inspiration.
